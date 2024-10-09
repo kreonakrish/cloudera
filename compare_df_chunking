@@ -1,0 +1,159 @@
+import pandas as pd
+
+class ReconHadoopVsDatabricks:
+    """
+    A class for comparing two DataFrames (hadoop_df and databricks_df) based on various conditions.
+    Handles large datasets using chunk processing to avoid memory overload.
+    """
+
+    def __init__(self, hadoop_df_path, databricks_df_path, chunksize=10**6):
+        """
+        Initialize with file paths and chunk size for large data handling.
+        
+        Parameters:
+        hadoop_df_path (str): Path to the Hadoop DataFrame CSV file.
+        databricks_df_path (str): Path to the Databricks DataFrame CSV file.
+        chunksize (int): Number of rows to process in each chunk. Default is 1 million.
+        """
+        self.hadoop_df_path = hadoop_df_path
+        self.databricks_df_path = databricks_df_path
+        self.chunksize = chunksize
+
+    def compare_row_count(self):
+        """ Compare row count by iterating through chunks to avoid memory overload. """
+        hadoop_row_count = 0
+        databricks_row_count = 0
+
+        # Count rows in Hadoop DataFrame
+        for chunk in pd.read_csv(self.hadoop_df_path, chunksize=self.chunksize):
+            hadoop_row_count += len(chunk)
+        
+        # Count rows in Databricks DataFrame
+        for chunk in pd.read_csv(self.databricks_df_path, chunksize=self.chunksize):
+            databricks_row_count += len(chunk)
+        
+        return {
+            'hadoop': hadoop_row_count,
+            'databricks': databricks_row_count,
+            'match': hadoop_row_count == databricks_row_count
+        }
+
+    def compare_grouped_row_count(self, partition_columns):
+        """ Compare grouped row count by processing data in chunks. """
+        hadoop_grouped_counts = {}
+        databricks_grouped_counts = {}
+
+        # Group rows in Hadoop DataFrame
+        for chunk in pd.read_csv(self.hadoop_df_path, chunksize=self.chunksize):
+            grouped = chunk.groupby(partition_columns).size()
+            hadoop_grouped_counts = self._aggregate_grouped_counts(hadoop_grouped_counts, grouped)
+        
+        # Group rows in Databricks DataFrame
+        for chunk in pd.read_csv(self.databricks_df_path, chunksize=self.chunksize):
+            grouped = chunk.groupby(partition_columns).size()
+            databricks_grouped_counts = self._aggregate_grouped_counts(databricks_grouped_counts, grouped)
+        
+        return hadoop_grouped_counts == databricks_grouped_counts
+
+    def compare_decimal_sum(self):
+        """ Compare sum of decimal columns by processing in chunks. """
+        decimal_sum_hadoop = pd.Series(dtype='float64')
+        decimal_sum_databricks = pd.Series(dtype='float64')
+
+        # Sum decimal columns in Hadoop DataFrame
+        for chunk in pd.read_csv(self.hadoop_df_path, chunksize=self.chunksize):
+            decimal_columns = chunk.select_dtypes(include=['float64', 'float32'])
+            decimal_sum_hadoop = decimal_sum_hadoop.add(decimal_columns.sum(), fill_value=0)
+
+        # Sum decimal columns in Databricks DataFrame
+        for chunk in pd.read_csv(self.databricks_df_path, chunksize=self.chunksize):
+            decimal_columns = chunk.select_dtypes(include=['float64', 'float32'])
+            decimal_sum_databricks = decimal_sum_databricks.add(decimal_columns.sum(), fill_value=0)
+
+        return decimal_sum_hadoop.equals(decimal_sum_databricks)
+
+    def compare_column_count(self):
+        """ Compare column count once, as column metadata doesn't require chunking. """
+        hadoop_df_columns = pd.read_csv(self.hadoop_df_path, nrows=1).shape[1]
+        databricks_df_columns = pd.read_csv(self.databricks_df_path, nrows=1).shape[1]
+        
+        return {
+            'hadoop': hadoop_df_columns,
+            'databricks': databricks_df_columns,
+            'match': hadoop_df_columns == databricks_df_columns
+        }
+
+    def compare_schema(self):
+        """ Compare schema (column names and data types). """
+        hadoop_schema = pd.read_csv(self.hadoop_df_path, nrows=1).dtypes
+        databricks_schema = pd.read_csv(self.databricks_df_path, nrows=1).dtypes
+        
+        return hadoop_schema.equals(databricks_schema)
+
+    def compare_date_format(self):
+        """ Compare date formats in chunks to avoid memory overload. """
+        for hadoop_chunk, databricks_chunk in zip(
+                pd.read_csv(self.hadoop_df_path, chunksize=self.chunksize, parse_dates=True),
+                pd.read_csv(self.databricks_df_path, chunksize=self.chunksize, parse_dates=True)
+        ):
+            date_columns_hadoop = hadoop_chunk.select_dtypes(include=['datetime64'])
+            date_columns_databricks = databricks_chunk.select_dtypes(include=['datetime64'])
+
+            if date_columns_hadoop.shape[1] != date_columns_databricks.shape[1]:
+                return False
+
+            for col in date_columns_hadoop.columns:
+                if not (pd.to_datetime(date_columns_hadoop[col], errors='coerce').equals(pd.to_datetime(date_columns_databricks[col], errors='coerce'))):
+                    return False
+
+        return True
+
+    def compare(self, partition_columns, test_cases):
+        """
+        Compare two DataFrames based on the specified test cases, with chunk processing for large datasets.
+
+        Parameters:
+        partition_columns (list): List of partition columns for group-by comparison.
+        test_cases (list): List of test cases to run. Pass 'all' to run all test cases.
+        
+        Returns:
+        dict: Dictionary with comparison results.
+        """
+        comparison_results = {}
+
+        # List of all available test cases
+        available_test_cases = ['row_count', 'grouped_row_count', 'decimal_sum', 'column_count', 'schema_match', 'date_format_match']
+        
+        # Check if all test cases should run
+        if 'all' in test_cases:
+            test_cases = available_test_cases
+
+        # Execute test cases based on the list passed
+        if 'row_count' in test_cases:
+            comparison_results['row_count'] = self.compare_row_count()
+
+        if 'grouped_row_count' in test_cases:
+            comparison_results['grouped_row_count'] = self.compare_grouped_row_count(partition_columns)
+
+        if 'decimal_sum' in test_cases:
+            comparison_results['decimal_sum'] = self.compare_decimal_sum()
+
+        if 'column_count' in test_cases:
+            comparison_results['column_count'] = self.compare_column_count()
+
+        if 'schema_match' in test_cases:
+            comparison_results['schema_match'] = self.compare_schema()
+
+        if 'date_format_match' in test_cases:
+            comparison_results['date_format_match'] = self.compare_date_format()
+
+        return comparison_results
+
+    def _aggregate_grouped_counts(self, current_grouped, new_grouped):
+        """Helper function to aggregate grouped counts across chunks."""
+        for index, value in new_grouped.items():
+            if index in current_grouped:
+                current_grouped[index] += value
+            else:
+                current_grouped[index] = value
+        return current_grouped
