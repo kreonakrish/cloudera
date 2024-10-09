@@ -1,4 +1,5 @@
 import pyodbc
+import pandas as pd
 
 # Function to connect to Hive or Impala via ODBC on Windows using Kerberos (LDAP)
 def create_odbc_connection(service, host, port, kerberos_service_name, ssl=True):
@@ -39,23 +40,28 @@ def create_odbc_connection(service, host, port, kerberos_service_name, ssl=True)
         print(f"Failed to connect to {service.upper()}: {e}")
         return None
 
-# Function to run SQL queries
-def run_sql_query(connection, sql_query):
+# Function to run SQL queries and store results in a DataFrame
+def run_sql_query_to_df(connection, sql_query):
     """
-    Execute a SQL query against Hive or Impala.
+    Execute a SQL query against Hive or Impala and return the results in a Pandas DataFrame.
 
     Parameters:
     connection: The ODBC connection object.
     sql_query (str): The SQL query to be executed.
 
     Returns:
-    results: The fetched results from the query.
+    df: Pandas DataFrame containing the query results.
     """
     cursor = connection.cursor()
     try:
         cursor.execute(sql_query)
-        results = cursor.fetchall()
-        return results
+        # Fetch the column names
+        columns = [desc[0] for desc in cursor.description]
+        # Fetch the data
+        data = cursor.fetchall()
+        # Convert the data to a Pandas DataFrame
+        df = pd.DataFrame.from_records(data, columns=columns)
+        return df
     except Exception as e:
         print(f"Error executing query: {e}")
     finally:
@@ -76,13 +82,12 @@ if __name__ == "__main__":
         # Example SQL query
         query = "SELECT * FROM your_table LIMIT 10;"
         
-        # Run the query
-        results = run_sql_query(conn, query)
+        # Run the query and store results in a Pandas DataFrame
+        df = run_sql_query_to_df(conn, query)
         
-        # Print the results
-        if results:
-            for row in results:
-                print(row)
+        # Print the DataFrame
+        if not df.empty:
+            print(df)
 
         # Close the connection
         conn.close()
