@@ -1,0 +1,111 @@
+import pandas as pd
+
+class ReconHadoopVsDatabricks:
+    """
+    A class for comparing two DataFrames (hadoop_df and databricks_df) based on various conditions.
+    """
+
+    def __init__(self, hadoop_df, databricks_df):
+        self.hadoop_df = hadoop_df
+        self.databricks_df = databricks_df
+
+    # 1. Compare row count in both DataFrames
+    def compare_row_count(self):
+        hadoop_row_count = len(self.hadoop_df)
+        databricks_row_count = len(self.databricks_df)
+        return {
+            'hadoop': hadoop_row_count,
+            'databricks': databricks_row_count,
+            'match': hadoop_row_count == databricks_row_count
+        }
+
+    # 2. Compare grouped row count by partition columns
+    def compare_grouped_row_count(self, partition_columns):
+        if partition_columns:
+            hadoop_grouped = self.hadoop_df.groupby(partition_columns).size().reset_index(name='count')
+            databricks_grouped = self.databricks_df.groupby(partition_columns).size().reset_index(name='count')
+            return hadoop_grouped.equals(databricks_grouped)
+        else:
+            return "No partition columns provided"
+
+    # 3. Compare sum of decimal columns
+    def compare_decimal_sum(self):
+        decimal_columns_hadoop = self.hadoop_df.select_dtypes(include=['float64', 'float32', 'decimal'])
+        decimal_columns_databricks = self.databricks_df.select_dtypes(include=['float64', 'float32', 'decimal'])
+
+        decimal_sum_hadoop = decimal_columns_hadoop.sum()
+        decimal_sum_databricks = decimal_columns_databricks.sum()
+
+        return decimal_sum_hadoop.equals(decimal_sum_databricks)
+
+    # 4. Compare number of columns
+    def compare_column_count(self):
+        hadoop_column_count = self.hadoop_df.shape[1]
+        databricks_column_count = self.databricks_df.shape[1]
+        return {
+            'hadoop': hadoop_column_count,
+            'databricks': databricks_column_count,
+            'match': hadoop_column_count == databricks_column_count
+        }
+
+    # 5. Compare schema (column names and data types)
+    def compare_schema(self):
+        hadoop_schema = self.hadoop_df.dtypes
+        databricks_schema = self.databricks_df.dtypes
+        return hadoop_schema.equals(databricks_schema)
+
+    # 6. Compare date formats in date/time columns
+    def compare_date_format(self):
+        date_columns_hadoop = self.hadoop_df.select_dtypes(include=['datetime64'])
+        date_columns_databricks = self.databricks_df.select_dtypes(include=['datetime64'])
+
+        if date_columns_hadoop.shape[1] != date_columns_databricks.shape[1]:
+            return False
+
+        for col in date_columns_hadoop.columns:
+            if not (pd.to_datetime(self.hadoop_df[col], errors='coerce').equals(pd.to_datetime(self.databricks_df[col], errors='coerce'))):
+                return False
+
+        return True
+
+    # Main method to run selected tests
+    def compare(self, partition_columns, test_cases):
+        """
+        Compare two DataFrames based on the specified test cases.
+
+        Parameters:
+        partition_columns (list): List of partition columns for group-by comparison.
+        test_cases (list): List of test cases to run. Pass 'all' to run all test cases.
+        
+        Returns:
+        dict: Dictionary with comparison results.
+        """
+        comparison_results = {}
+
+        # List of all available test cases
+        available_test_cases = ['row_count', 'grouped_row_count', 'decimal_sum', 'column_count', 'schema_match', 'date_format_match']
+        
+        # Check if all test cases should run
+        if 'all' in test_cases:
+            test_cases = available_test_cases
+
+        # Execute test cases based on the list passed
+        if 'row_count' in test_cases:
+            comparison_results['row_count'] = self.compare_row_count()
+
+        if 'grouped_row_count' in test_cases:
+            comparison_results['grouped_row_count'] = self.compare_grouped_row_count(partition_columns)
+
+        if 'decimal_sum' in test_cases:
+            comparison_results['decimal_sum'] = self.compare_decimal_sum()
+
+        if 'column_count' in test_cases:
+            comparison_results['column_count'] = self.compare_column_count()
+
+        if 'schema_match' in test_cases:
+            comparison_results['schema_match'] = self.compare_schema()
+
+        if 'date_format_match' in test_cases:
+            comparison_results['date_format_match'] = self.compare_date_format()
+
+        return comparison_results
