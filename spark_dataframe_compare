@@ -1,0 +1,133 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import sum as spark_sum
+
+class ReconHadoopVsDatabricks:
+    """
+    A class for comparing two DataFrames (hadoop_df and databricks_df) using PySpark
+    to handle large datasets in a distributed fashion.
+    """
+
+    def __init__(self, spark, hadoop_df_path, databricks_df_path):
+        """
+        Initialize with Spark session and paths to the data.
+
+        Parameters:
+        spark (SparkSession): The Spark session for PySpark.
+        hadoop_df_path (str): Path to the Hadoop DataFrame (parquet/csv).
+        databricks_df_path (str): Path to the Databricks DataFrame (parquet/csv).
+        """
+        self.spark = spark
+        self.hadoop_df = self.spark.read.csv(hadoop_df_path, header=True, inferSchema=True)  # You can change to parquet if needed
+        self.databricks_df = self.spark.read.csv(databricks_df_path, header=True, inferSchema=True)
+
+    # 1. Compare row count in both DataFrames
+    def compare_row_count(self):
+        hadoop_row_count = self.hadoop_df.count()
+        databricks_row_count = self.databricks_df.count()
+
+        return {
+            'hadoop': hadoop_row_count,
+            'databricks': databricks_row_count,
+            'match': hadoop_row_count == databricks_row_count
+        }
+
+    # 2. Compare grouped row count by partition columns
+    def compare_grouped_row_count(self, partition_columns):
+        hadoop_grouped = self.hadoop_df.groupBy(partition_columns).count().orderBy(partition_columns).collect()
+        databricks_grouped = self.databricks_df.groupBy(partition_columns).count().orderBy(partition_columns).collect()
+
+        return hadoop_grouped == databricks_grouped
+
+    # 3. Compare sum of decimal columns
+    def compare_decimal_sum(self):
+        # Get the decimal columns
+        decimal_columns_hadoop = [col for col, dtype in self.hadoop_df.dtypes if dtype in ['double', 'float']]
+        decimal_columns_databricks = [col for col, dtype in self.databricks_df.dtypes if dtype in ['double', 'float']]
+
+        if set(decimal_columns_hadoop) != set(decimal_columns_databricks):
+            return False  # If columns don't match, return False
+
+        # Sum decimal columns in Hadoop DataFrame
+        hadoop_sum = self.hadoop_df.select([spark_sum(c).alias(c) for c in decimal_columns_hadoop]).collect()[0]
+        databricks_sum = self.databricks_df.select([spark_sum(c).alias(c) for c in decimal_columns_databricks]).collect()[0]
+
+        return hadoop_sum == databricks_sum
+
+    # 4. Compare number of columns
+    def compare_column_count(self):
+        hadoop_column_count = len(self.hadoop_df.columns)
+        databricks_column_count = len(self.databricks_df.columns)
+
+        return {
+            'hadoop': hadoop_column_count,
+            'databricks': databricks_column_count,
+            'match': hadoop_column_count == databricks_column_count
+        }
+
+    # 5. Compare schema (column names and data types)
+    def compare_schema(self):
+        hadoop_schema = self.hadoop_df.dtypes
+        databricks_schema = self.databricks_df.dtypes
+
+        return hadoop_schema == databricks_schema
+
+    # 6. Compare date formats in date/time columns
+    def compare_date_format(self):
+        # Get date and timestamp columns
+        date_columns_hadoop = [col for col, dtype in self.hadoop_df.dtypes if dtype in ['timestamp', 'date']]
+        date_columns_databricks = [col for col, dtype in self.databricks_df.dtypes if dtype in ['timestamp', 'date']]
+
+        if set(date_columns_hadoop) != set(date_columns_databricks):
+            return False
+
+        # Compare the data in each date column
+        for col in date_columns_hadoop:
+            hadoop_dates = self.hadoop_df.select(col).collect()
+            databricks_dates = self.databricks_df.select(col).collect()
+
+            if hadoop_dates != databricks_dates:
+                return False
+
+        return True
+
+    # Main method to run selected tests
+    def compare(self, partition_columns, test_cases):
+        """
+        Compare two DataFrames based on the specified test cases, using PySpark for large datasets.
+
+        Parameters:
+        partition_columns (list): List of partition columns for group-by comparison.
+        test_cases (list): List of test cases to run. Pass 'all' to run all test cases.
+        
+        Returns:
+        dict: Dictionary with comparison results.
+        """
+        comparison_results = {}
+
+        # List of all available test cases
+        available_test_cases = ['row_count', 'grouped_row_count', 'decimal_sum', 'column_count', 'schema_match', 'date_format_match']
+        
+        # Check if all test cases should run
+        if 'all' in test_cases:
+            test_cases = available_test_cases
+
+        # Execute test cases based on the list passed
+        if 'row_count' in test_cases:
+            comparison_results['row_count'] = self.compare_row_count()
+
+        if 'grouped_row_count' in test_cases:
+            comparison_results['grouped_row_count'] = self.compare_grouped_row_count(partition_columns)
+
+        if 'decimal_sum' in test_cases:
+            comparison_results['decimal_sum'] = self.compare_decimal_sum()
+
+        if 'column_count' in test_cases:
+            comparison_results['column_count'] = self.compare_column_count()
+
+        if 'schema_match' in test_cases:
+            comparison_results['schema_match'] = self.compare_schema()
+
+        if 'date_format_match' in test_cases:
+            comparison_results['date_format_match'] = self.compare_date_format()
+
+        return comparison_results
