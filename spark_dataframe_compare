@@ -1,0 +1,24 @@
+# Example usage of the ReconHadoopVsDatabricks class with PySpark:
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("ReconHadoopVsDatabricks").getOrCreate()
+
+# File paths to the Hadoop and Databricks datasets (assuming CSV format)
+hadoop_file_path = 'hadoop_df.csv'
+databricks_file_path = 'databricks_df.csv'
+
+# Initialize the class with Spark session and file paths
+recon = ReconHadoopVsDatabricks(spark, hadoop_file_path, databricks_file_path)
+
+# Define the partition columns for group-by comparisons
+partition_columns = ['partition_column_1', 'partition_column_2']  # Replace with actual partition columns
+
+# Define the test cases to run (e.g., ['row_count', 'schema_match']), or pass 'all' to run all test cases
+test_cases = ['row_count', 'schema_match']  # Replace with the test cases you want to run, or use 'all'
+
+# Run the comparison
+comparison_results = recon.compare(partition_columns, test_cases)
+
+# Display the comparison results
+for key, value in comparison_results.items():
+    print(f"{key}: {value}")
